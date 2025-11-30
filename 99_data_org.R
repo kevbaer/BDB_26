@@ -41,6 +41,7 @@ input <- read_parquet("data/input.parquet") |>
   mutate(hcomp = cos(dir), vcomp = sin(dir)) |>
   mutate(h_speed = hcomp * s, v_speed = vcomp * s)
 
+
 output <- read_parquet("data/output.parquet") |>
   left_join(
     read_parquet("data/input.parquet") |>
@@ -67,8 +68,13 @@ output <- read_parquet("data/output.parquet") |>
     .by = c(game_id, play_id, nfl_id)
   ) |>
   mutate(
-    s_estimate = sqrt((x_lag_3 - x_lag_1)**2 + (y_lag_3 - y_lag_1)**2) / .2
-  )
+    s_est = sqrt((x_lag_3 - x_lag_1)**2 + (y_lag_3 - y_lag_1)**2) / .2
+  ) |>
+  mutate(
+    dir_est = atan2(y_lag_1 - y_lag_3, x_lag_1 - x_lag_3) %% (2 * pi)
+  ) |>
+  mutate(hcomp_est = cos(dir_est), vcomp_est = sin(dir_est)) |>
+  mutate(h_speed_est = hcomp_est * s_est, v_speed_est = vcomp_est * s_est)
 
 
 play_info <- input |>
