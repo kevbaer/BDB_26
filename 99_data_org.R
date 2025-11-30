@@ -102,4 +102,8 @@ at_throw_df <- input |>
   filter(frame_id == (max(frame_id) - 5), .by = c(game_id, play_id, nfl_id)) |>
   filter(player_to_predict)
 
+at_arrival_df <- enhanced_output |>
+  filter(frame_id == max(frame_id), .by = c(game_id, play_id, nfl_id))
+
 # write_parquet(at_throw_df, "transfer/at_throw_df.parquet")
+# write_parquet(at_arrival_df, "transfer/at_arrival_df.parquet")
