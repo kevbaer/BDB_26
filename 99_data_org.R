@@ -95,7 +95,10 @@ play_info <- input |>
 
 enhanced_output <- output |>
   left_join(play_info, by = join_by(game_id, play_id, nfl_id)) |>
-  select(-play_direction)
+  select(-play_direction) |>
+  mutate(h_dist_from_ball = abs(ball_land_x - x)) |>
+  mutate(v_dist_from_ball = abs(ball_land_y - y)) |>
+  mutate(total_dist_from_ball = (h_dist_from_ball^2 + v_dist_from_ball^2)^.5)
 
 
 at_throw_df <- input |>

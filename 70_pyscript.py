@@ -103,7 +103,7 @@ def receiver_pdf_builder(data, game, play):
 
 
 
-def ball_landing_pdf_builder(data, game, play):
+def ball_landing_pdf_builder(data, game, play, cov_val = 5):
     mask = (
         (data["game_id"] == game) & 
         (data["play_id"] == play) & 
@@ -117,7 +117,7 @@ def ball_landing_pdf_builder(data, game, play):
     row = filtered.iloc[0]
     ball_landing_pdf = stats.multivariate_normal(
         [row["ball_land_x"], row["ball_land_y"]], 
-        [[5, 0], [0, 5]]
+        [[cov_val, 0], [0, cov_val]]
     ).pdf(locations)
     
     return ball_landing_pdf
@@ -208,4 +208,77 @@ def run():
 
 final_throw_df = game_and_play_pairs.with_columns(pl.Series("Receiver_Control", run())) 
 
-final_throw_df.write_parquet("sharing/final_throw_df.parquet")
+
+# final_throw_df.write_parquet("sharing/final_throw_df.parquet")
+
+# ----------- Arrival -----------
+
+game_play_defender_trios = (
+    at_arrival_df
+    .filter(pl.col("player_role") == "Defensive Coverage")
+    .select("game_id", "play_id", "nfl_id").unique()
+    )
+
+at_arrival_df_pd = at_arrival_df.rename(lambda name: name.replace("_est", "")).to_pandas()
+
+def ind_def_evaluator(defender, receiver, ball):
+    def_control = np.array(defender) * np.array(ball)
+    off_control = np.array(receiver) * np.array(ball)
+
+    return np.sum(np.sum(def_control, axis = 1), axis = 0) / np.sum(np.sum(off_control, axis = 1), axis = 0)
+
+
+def ind_defense_pdf_builder(data, game, play, def_id):
+    mask = (
+        (data["game_id"] == game) & 
+        (data["play_id"] == play) & 
+        (data["nfl_id"] == def_id)
+    )
+    filtered = data[mask]
+
+    row = filtered.iloc[0]
+    
+    speedUsage = (row.s ** 2) / (121)
+    upLeftScaling = (
+        row.total_dist_from_ball + row.total_dist_from_ball * speedUsage
+    ) / 2
+    bottomRightScaling = (
+        row.total_dist_from_ball - row.total_dist_from_ball * speedUsage
+    ) / 2
+    r_matrix = [(row.hcomp, -row.vcomp), (row.vcomp, row.hcomp)]
+    r_matrix = pd.DataFrame(data=r_matrix)
+    s_matrix = [
+        (upLeftScaling + 0.0000001, 0),
+        (0, bottomRightScaling - 0.0000001),
+    ]
+    s_matrix = pd.DataFrame(data=s_matrix)
+    inverse_r_Matrix = np.linalg.inv(r_matrix)
+    Matrixmult = r_matrix.dot(s_matrix)
+    nextMatrix = Matrixmult.dot(s_matrix)
+    covariance_matrix = nextMatrix.dot(inverse_r_Matrix)
+    mean_x = row.x + row.h_speed * 0.5
+    mean_y = row.y + row.v_speed * 0.5
+    means = [mean_x, mean_y]
+    player_pdf = stats.multivariate_normal(means, covariance_matrix).pdf(
+        locations
+    )
+    percent_player_pdf = player_pdf / np.sum(np.sum(player_pdf, axis=1), axis=0)
+
+    return percent_player_pdf
+
+def build_arrival_final():
+    defender_control = np.array([-1] * game_play_defender_trios.height, dtype = float)
+    for index, row, in game_play_defender_trios.to_pandas().iterrows():
+        GS = row["game_id"]
+        PS = row["play_id"]
+        Def_Id = row["nfl_id"]
+        defender_control[index] = ind_def_evaluator(
+            ind_defense_pdf_builder(at_arrival_df_pd, GS, PS, Def_Id),
+            receiver_pdf_builder(at_arrival_df_pd,  GS, PS),
+            ball_landing_pdf_builder(at_arrival_df_pd, GS, PS)
+        )
+    return(defender_control)
+
+final_arrival_df = game_play_defender_trios.with_columns(pl.Series("Def_Player_Control", build_arrival_final())) 
+
+# final_arrival_df.write_parquet("sharing/final_arrival_Df.parquet")
