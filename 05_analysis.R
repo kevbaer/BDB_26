@@ -42,8 +42,11 @@ approve_at_catch |>
 
 # Daniel ------------------------------------------------------------------
 
-final_throw_df2 <- read_parquet("sharing/final_throw_df_2.parquet") |>
+final_throw_df2 <- read_parquet("sharing/final_throw_df_3.parquet") |>
   rename(Def_Player_Control_at_Throw = Def_Player_Control)
+
+final_arrival_df2 <- read_parquet("sharing/final_arrival_df_daniel.parquet") |>
+  rename(Def_Player_Control_at_Arrival = Def_Player_Control)
 
 frame_df <- input |>
   select(game_id, play_id, num_frames_output) |>
@@ -52,8 +55,7 @@ frame_df <- input |>
 final_throw_df2 |>
   inner_join(approve_at_throw, by = join_by(game_id, play_id)) |>
   select(-Receiver_Control) |>
-  left_join(results_arrival, by = join_by(game_id, play_id, nfl_id)) |>
-  rename(Def_Player_Control_at_Arrival = Def_Player_Control) |>
+  left_join(final_arrival_df2, by = join_by(game_id, play_id, nfl_id)) |>
   left_join(frame_df, by = join_by(game_id, play_id)) |>
   mutate(
     delta_def_control = (Def_Player_Control_at_Arrival -
