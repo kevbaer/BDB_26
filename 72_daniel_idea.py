@@ -52,4 +52,4 @@ def build_arrival_final_3():
 
 final_throw_df_2 = game_play_defender_trios_3.with_columns(pl.Series("Def_Player_Control", build_arrival_final_3())) 
 
-# final_throw_df_2.write_parquet("sharing/final_arrival_df_daniel.parquet")
+#  final_throw_df_2.write_parquet("sharing/final_arrival_df_daniel.parquet")

@@ -31,13 +31,78 @@ approve_at_throw <- results_throw |>
 approve_at_catch <- results_arrival |>
   filter(Def_Player_Control > 1)
 
-approve_at_catch |>
+full_leaderboard <- approve_at_catch |>
   inner_join(approve_at_throw, by = join_by(game_id, play_id)) |>
   summarize(n = n(), .by = nfl_id) |>
   arrange(desc(n)) |>
   left_join(player_df, by = join_by(nfl_id)) |>
-  relocate(n, .after = last_col()) |>
+  relocate(n, .after = last_col())
+
+
+# Load in More Data Sources -----------------------------------------------
+
+library(nflreadr)
+sumer_dat <- read_parquet("data/sumer_coverages_player_play.parquet")
+
+thirds_sumer <- sumer_dat |>
+  filter(coverage_responsibility == "THIRD") |>
   View()
+
+ftn_dat <- load_ftn_charting(seasons = 2023) |>
+  select(
+    nflverse_game_id,
+    nflverse_play_id,
+    is_interception_worthy,
+    is_contested_ball
+  )
+
+fastr_dat <- load_pbp(seasons = 2023) |>
+  mutate(old_game_id = as.numeric(old_game_id)) |>
+  select(
+    game_id,
+    old_game_id,
+    play_id,
+    home_team,
+    away_team,
+    week,
+    posteam,
+    defteam,
+    yards_gained,
+    pass_length,
+    pass_location,
+    air_yards,
+    yards_after_catch,
+    wp,
+    wpa,
+    ep,
+    epa,
+    air_wpa,
+    yac_wpa,
+    air_epa,
+    yac_epa,
+    incomplete_pass,
+    interception,
+    interception_player_id,
+    interception_player_name,
+    cp,
+    cpoe
+  ) |>
+  left_join(
+    ftn_dat,
+    join_by(game_id == nflverse_game_id, play_id == nflverse_play_id)
+  ) |>
+  select(-game_id)
+
+full_added_dat <- inner_join(
+  sumer_dat,
+  fastr_dat,
+  by = join_by(game_id == old_game_id, play_id)
+)
+
+
+working_dat <- approve_at_catch |>
+  inner_join(approve_at_throw, by = join_by(game_id, play_id)) |>
+  left_join(full_added_dat, by = join_by(game_id, play_id, nfl_id))
 
 
 # Daniel ------------------------------------------------------------------
