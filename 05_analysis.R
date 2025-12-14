@@ -18,9 +18,26 @@ at_arrival_df |>
   filter(game_id == 2023120700 & play_id == 1789) |>
   View()
 
+pl_nflfastr <- load_players() |>
+  select(
+    display_name,
+    short_name,
+    nfl_id,
+    position_group,
+    position,
+    height,
+    weight,
+    headshot,
+    pff_position,
+    gsis_id
+  ) |>
+  mutate(nfl_id = as.numeric(nfl_id))
+
+
 player_df <- input |>
   select(nfl_id, player_name, player_position) |>
-  unique()
+  unique() |>
+  left_join(pl_nflfastr, join_by(nfl_id))
 
 
 # leaderboard -------------------------------------------------------------
@@ -93,16 +110,93 @@ fastr_dat <- load_pbp(seasons = 2023) |>
   ) |>
   select(-game_id)
 
+partic <- load_participation(seasons = 2023) |>
+  mutate(old_game_id = as.numeric(old_game_id)) |>
+  select(
+    old_game_id,
+    play_id,
+    number_of_pass_rushers,
+    defense_players,
+    n_defense,
+    time_to_throw,
+    was_pressure,
+    defense_man_zone_type,
+    defense_coverage_type
+  ) |>
+  semi_join(results_throw, by = join_by(old_game_id == game_id, play_id)) |>
+  separate_wider_delim(defense_players, ";", names_sep = "_") |>
+  mutate(
+    number_of_pass_rushers = ifelse(
+      number_of_pass_rushers > 11,
+      NA,
+      number_of_pass_rushers
+    )
+  )
+
+partic_by_player <- load_participation(seasons = 2023) |>
+  mutate(old_game_id = as.numeric(old_game_id)) |>
+  select(
+    old_game_id,
+    play_id,
+    number_of_pass_rushers,
+    defense_players,
+    n_defense,
+    time_to_throw,
+    was_pressure,
+    defense_man_zone_type,
+    defense_coverage_type
+  ) |>
+  semi_join(results_throw, by = join_by(old_game_id == game_id, play_id)) |>
+  separate_longer_delim(defense_players, ";") |>
+  summarize(n = n(), .by = defense_players) |>
+  arrange(desc(n))
+
+
 full_added_dat <- inner_join(
   sumer_dat,
   fastr_dat,
   by = join_by(game_id == old_game_id, play_id)
 )
 
-
 working_dat <- approve_at_catch |>
   inner_join(approve_at_throw, by = join_by(game_id, play_id)) |>
   left_join(full_added_dat, by = join_by(game_id, play_id, nfl_id))
+
+
+# Joint Leaderboard -------------------------------------------------------
+
+library(gt)
+library(gtExtras)
+
+full_leaderboard |>
+  left_join(partic_by_player, join_by(gsis_id == defense_players)) |>
+  mutate(turnover_opp_pct = n.x / n.y) |>
+  select(
+    headshot,
+    player = player_name,
+    position = pff_position,
+    turnover_opps = n.x,
+    total_coverage_reps = n.y,
+    turnover_opp_pct
+  ) |>
+  arrange(desc(turnover_opp_pct)) |>
+  filter(total_coverage_reps > 150) |>
+  slice_max(turnover_opp_pct, n = 20) |>
+  mutate(
+    row_id = str_glue(
+      "{dplyr::row_number()}."
+    ),
+    .before = 1
+  ) |>
+  gt() |>
+  gt_theme_espn() |>
+  gt_img_rows(headshot, height = 45) |>
+  fmt_percent(turnover_opp_pct) |>
+  gt_hulk_col_numeric(
+    turnover_opp_pct,
+    domain = c(0, .05)
+  ) |>
+  cols_align(align = "center")
 
 
 # Daniel ------------------------------------------------------------------
