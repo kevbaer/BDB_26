@@ -223,7 +223,7 @@ def run():
 final_throw_df = game_and_play_pairs.with_columns(pl.Series("Receiver_Control", run()))
 
 
-final_throw_df.write_parquet("sharing/final_throw_df_mon15.parquet")
+# final_throw_df.write_parquet("sharing/final_throw_df_mon15.parquet")
 
 # ----------- Arrival -----------
 

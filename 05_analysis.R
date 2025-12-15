@@ -1,8 +1,8 @@
-results_throw <- read_parquet("sharing/final_throw_df.parquet")
+results_throw <- read_parquet("sharing/final_throw_df_mon15.parquet")
 
 results_throw |> filter(is.na(Receiver_Control))
 
-results_arrival <- read_parquet("sharing/final_arrival_Df.parquet")
+results_arrival <- read_parquet("sharing/final_arrival_df_mon15.parquet")
 
 valid_arrivals <- results_arrival |>
   filter(!is.na(Def_Player_Control))
@@ -201,10 +201,12 @@ full_leaderboard |>
 
 # Daniel ------------------------------------------------------------------
 
-final_throw_df2 <- read_parquet("sharing/final_throw_df_3.parquet") |>
+final_throw_df2 <- read_parquet("sharing/final_throw_df_3_mon15.parquet") |>
   rename(Def_Player_Control_at_Throw = Def_Player_Control)
 
-final_arrival_df2 <- read_parquet("sharing/final_arrival_df_daniel.parquet") |>
+final_arrival_df2 <- read_parquet(
+  "sharing/final_arrival_df_daniel_mon15.parquet"
+) |>
   rename(Def_Player_Control_at_Arrival = Def_Player_Control)
 
 frame_df <- input |>

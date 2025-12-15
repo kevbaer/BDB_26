@@ -38,7 +38,7 @@ final_throw_df_2 = game_play_defender_trios_2.with_columns(
     pl.Series("Def_Player_Control", build_arrival_final_2())
 )
 
-# final_throw_df_2.write_parquet("sharing/final_throw_df_mon15.parquet")
+final_throw_df_2.write_parquet("sharing/final_throw_df_2_mon15.parquet")
 
 game_play_defender_trios_3 = (
     at_arrival_df.filter(pl.col("player_role") == "Defensive Coverage")
