@@ -118,8 +118,6 @@ def ball_landing_pdf_builder(data, game, play, cov_val=5):
 
     row = filtered.iloc[0]
 
-    cov_val=2+1.5*row["num_frames_output"]/10
-
     ball_landing_pdf = stats.multivariate_normal(
         [row["ball_land_x"], row["ball_land_y"]], [[cov_val, 0], [0, cov_val]]
     ).pdf(locations) + np.float64(1 * (10**-100))
@@ -226,7 +224,7 @@ def run():
 final_throw_df = game_and_play_pairs.with_columns(pl.Series("Receiver_Control", run()))
 
 
-# final_throw_df.write_parquet("sharing/final_throw_df_mon15_gamma.parquet")
+# final_throw_df.write_parquet("sharing/final_throw_df_mon15.parquet")
 
 # ----------- Arrival -----------
 
@@ -310,4 +308,4 @@ final_arrival_df = game_play_defender_trios.with_columns(
     pl.Series("Def_Player_Control", build_arrival_final())
 )
 
-# final_arrival_df.write_parquet("sharing/final_arrival_df_mon15_gamma.parquet")
+# final_arrival_df.write_parquet("sharing/final_arrival_df_mon15.parquet")
