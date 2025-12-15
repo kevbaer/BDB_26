@@ -18,21 +18,24 @@ mean_y = 0
 
 def defense_pdf_builder(data, game, play):
     mask = (
-        (data["game_id"] == game) & 
-        (data["play_id"] == play) & 
-        (data["player_side"] == "Defense")
+        (data["game_id"] == game)
+        & (data["play_id"] == play)
+        & (data["player_side"] == "Defense")
     )
     defense_data = data[mask]
 
     if defense_data.empty:
-        return [stats.multivariate_normal([0, 0], [[1, 0], [0, 1]]).pdf(locations)]
-    
+        return [
+            stats.multivariate_normal([0, 0], [[1, 0], [0, 1]]).pdf(locations)
+            + np.float64(1 * (10**-100))
+        ]
+
     defense_pdfs = []
 
     for row in defense_data.itertuples(index=False):
-            # the following steps are coded from Bornn and Fernandez's 2018 paper
-            # with assist from Inayatali, Hocevar, and White's 2023 BDB entry.
-        speedUsage = (row.s ** 2) / (121)
+        # the following steps are coded from Bornn and Fernandez's 2018 paper
+        # with assist from Inayatali, Hocevar, and White's 2023 BDB entry.
+        speedUsage = (row.s**2) / (121)
         upLeftScaling = (
             row.total_dist_from_ball + row.total_dist_from_ball * speedUsage
         ) / 2
@@ -56,18 +59,19 @@ def defense_pdf_builder(data, game, play):
         # player_pdf creates the influence map
         player_pdf = stats.multivariate_normal(means, covariance_matrix).pdf(
             locations
-        )
+        ) + np.float64(1 * (10**-100))
         # percent_player_pdf shows the percentage of their total influence at any one point
         percent_player_pdf = player_pdf / np.sum(np.sum(player_pdf, axis=1), axis=0)
         defense_pdfs.append(percent_player_pdf)
 
     return defense_pdfs
 
+
 def receiver_pdf_builder(data, game, play):
     mask = (
-        (data["game_id"] == game) & 
-        (data["play_id"] == play) & 
-        (data["player_role"] == "Targeted Receiver")
+        (data["game_id"] == game)
+        & (data["play_id"] == play)
+        & (data["player_role"] == "Targeted Receiver")
     )
     filtered = data[mask]
 
@@ -96,30 +100,27 @@ def receiver_pdf_builder(data, game, play):
     means = [mean_x, mean_y]
     player_pdf = stats.multivariate_normal(means, covariance_matrix).pdf(
         locations
-    )
+    ) + np.float64(1 * (10**-100))
     percent_player_pdf = player_pdf / np.sum(np.sum(player_pdf, axis=1), axis=0)
     return percent_player_pdf
 
 
-
-
-def ball_landing_pdf_builder(data, game, play, cov_val = 5):
+def ball_landing_pdf_builder(data, game, play, cov_val=5):
     mask = (
-        (data["game_id"] == game) & 
-        (data["play_id"] == play) & 
-        (data["player_role"] == "Targeted Receiver")
+        (data["game_id"] == game)
+        & (data["play_id"] == play)
+        & (data["player_role"] == "Targeted Receiver")
     )
     filtered = data[mask]
-    
+
     if filtered.empty:
         return None
-    
+
     row = filtered.iloc[0]
     ball_landing_pdf = stats.multivariate_normal(
-        [row["ball_land_x"], row["ball_land_y"]], 
-        [[cov_val, 0], [0, cov_val]]
-    ).pdf(locations)
-    
+        [row["ball_land_x"], row["ball_land_y"]], [[cov_val, 0], [0, cov_val]]
+    ).pdf(locations) + np.float64(1 * (10**-100))
+
     return ball_landing_pdf
 
 
@@ -127,30 +128,36 @@ def evaluator(defenders, receiver, ball):
     def_control_vec = []
     for DefPlayerPDF in defenders:
         def_control_vec.append(np.array(DefPlayerPDF) * np.array(ball))
-    
+
     def_control = sum(def_control_vec)
     off_control = np.array(receiver) * np.array(ball)
 
-        # swarm_val = np.sum(np.sum(result, axis=1), axis=0) / np.sum(
-        #     np.sum(carrier, axis=1), axis=0
-        # )
-        # def_control_vec.append(swarm_val)
-    return np.sum(np.sum(off_control, axis = 1), axis = 0) / (np.sum(np.sum(def_control, axis = 1), axis = 0) +  np.sum(np.sum(off_control, axis = 1), axis = 0))
+    # swarm_val = np.sum(np.sum(result, axis=1), axis=0) / np.sum(
+    #     np.sum(carrier, axis=1), axis=0
+    # )
+    # def_control_vec.append(swarm_val)
+    return np.sum(np.sum(off_control, axis=1), axis=0) / (
+        np.sum(np.sum(def_control, axis=1), axis=0)
+        + np.sum(np.sum(off_control, axis=1), axis=0)
+    )
 
 
 def supercheck(defenders, carrier):
-  values = []
-  for DefPlayerPDF in defenders:
-    result = np.array(DefPlayerPDF) * np.array(carrier)
-    swarm_val = np.sum(np.sum(result, axis=1), axis=0) / np.sum(np.sum(carrier, axis=1), axis=0)
-    values.append(swarm_val)
-  count = 0
-  for value in values:
-    if value > 0.0055:
-      count = count + 1
-    print(value)
-    print(count)
-  return(count)
+    values = []
+    for DefPlayerPDF in defenders:
+        result = np.array(DefPlayerPDF) * np.array(carrier)
+        swarm_val = np.sum(np.sum(result, axis=1), axis=0) / np.sum(
+            np.sum(carrier, axis=1), axis=0
+        )
+        values.append(swarm_val)
+    count = 0
+    for value in values:
+        if value > 0.0055:
+            count = count + 1
+        print(value)
+        print(count)
+    return count
+
 
 # def DefpdfChecker(data, game, play):
 #     DefensePdfs = []
@@ -182,11 +189,13 @@ def supercheck(defenders, carrier):
 
 
 def playTester(data, game, play):
-  print(supercheck(
-    defense_pdf_builder(data, game, play),
-    receiver_pdf_builder(data, game,play)
-    ))
-     
+    print(
+        supercheck(
+            defense_pdf_builder(data, game, play),
+            receiver_pdf_builder(data, game, play),
+        )
+    )
+
 
 # ----------- Do the work -----------
 game_and_play_pairs = at_throw_df.select("game_id", "play_id").unique()
@@ -194,51 +203,61 @@ game_and_play_pairs = at_throw_df.select("game_id", "play_id").unique()
 
 at_throw_df_pd = at_throw_df.to_pandas()
 
+
 def run():
-    receiver_control = np.array([-1] * game_and_play_pairs.height, dtype = float) 
-    for index, row, in game_and_play_pairs.to_pandas().iterrows():
+    receiver_control = np.array([-1] * game_and_play_pairs.height, dtype=float)
+    for (
+        index,
+        row,
+    ) in game_and_play_pairs.to_pandas().iterrows():
         GS = row["game_id"]
         PS = row["play_id"]
         receiver_control[index] = evaluator(
-                defense_pdf_builder(at_throw_df_pd, GS, PS),
-                receiver_pdf_builder(at_throw_df_pd,  GS, PS),
-                ball_landing_pdf_builder(at_throw_df_pd, GS, PS)
-            )
+            defense_pdf_builder(at_throw_df_pd, GS, PS),
+            receiver_pdf_builder(at_throw_df_pd, GS, PS),
+            ball_landing_pdf_builder(at_throw_df_pd, GS, PS),
+        )
     return receiver_control
 
-final_throw_df = game_and_play_pairs.with_columns(pl.Series("Receiver_Control", run())) 
+
+final_throw_df = game_and_play_pairs.with_columns(pl.Series("Receiver_Control", run()))
 
 
-# final_throw_df.write_parquet("sharing/final_throw_df.parquet")
+final_throw_df.write_parquet("sharing/final_throw_df_mon15.parquet")
 
 # ----------- Arrival -----------
 
 game_play_defender_trios = (
-    at_arrival_df
-    .filter(pl.col("player_role") == "Defensive Coverage")
-    .select("game_id", "play_id", "nfl_id").unique()
-    )
+    at_arrival_df.filter(pl.col("player_role") == "Defensive Coverage")
+    .select("game_id", "play_id", "nfl_id")
+    .unique()
+)
 
-at_arrival_df_pd = at_arrival_df.rename(lambda name: name.replace("_est", "")).to_pandas()
+at_arrival_df_pd = at_arrival_df.rename(
+    lambda name: name.replace("_est", "")
+).to_pandas()
+
 
 def ind_def_evaluator(defender, receiver, ball):
     def_control = np.array(defender) * np.array(ball)
     off_control = np.array(receiver) * np.array(ball)
 
-    return np.sum(np.sum(def_control, axis = 1), axis = 0) / np.sum(np.sum(off_control, axis = 1), axis = 0)
+    def_abc = np.sum(np.sum(def_control, axis=1), axis=0)
+
+    return def_abc / (np.sum(np.sum(off_control, axis=1), axis=0) + def_abc)
 
 
 def ind_defense_pdf_builder(data, game, play, def_id):
     mask = (
-        (data["game_id"] == game) & 
-        (data["play_id"] == play) & 
-        (data["nfl_id"] == def_id)
+        (data["game_id"] == game)
+        & (data["play_id"] == play)
+        & (data["nfl_id"] == def_id)
     )
     filtered = data[mask]
 
     row = filtered.iloc[0]
-    
-    speedUsage = (row.s ** 2) / (121)
+
+    speedUsage = (row.s**2) / (121)
     upLeftScaling = (
         row.total_dist_from_ball + row.total_dist_from_ball * speedUsage
     ) / 2
@@ -261,26 +280,31 @@ def ind_defense_pdf_builder(data, game, play, def_id):
     means = [mean_x, mean_y]
     player_pdf = stats.multivariate_normal(means, covariance_matrix).pdf(
         locations
-    )
+    ) + np.float64(1 * (10**-100))
     percent_player_pdf = player_pdf / np.sum(np.sum(player_pdf, axis=1), axis=0)
 
     return percent_player_pdf
 
+
 def build_arrival_final():
-    defender_control = np.array([-1] * game_play_defender_trios.height, dtype = float)
-    for index, row, in game_play_defender_trios.to_pandas().iterrows():
+    defender_control = np.array([-1] * game_play_defender_trios.height, dtype=float)
+    for (
+        index,
+        row,
+    ) in game_play_defender_trios.to_pandas().iterrows():
         GS = row["game_id"]
         PS = row["play_id"]
         Def_Id = row["nfl_id"]
         defender_control[index] = ind_def_evaluator(
             ind_defense_pdf_builder(at_arrival_df_pd, GS, PS, Def_Id),
-            receiver_pdf_builder(at_arrival_df_pd,  GS, PS),
-            ball_landing_pdf_builder(at_arrival_df_pd, GS, PS)
+            receiver_pdf_builder(at_arrival_df_pd, GS, PS),
+            ball_landing_pdf_builder(at_arrival_df_pd, GS, PS),
         )
-    return(defender_control)
-
-final_arrival_df = game_play_defender_trios.with_columns(pl.Series("Def_Player_Control", build_arrival_final())) 
-
-# final_arrival_df.write_parquet("sharing/final_arrival_Df.parquet")
+    return defender_control
 
 
+final_arrival_df = game_play_defender_trios.with_columns(
+    pl.Series("Def_Player_Control", build_arrival_final())
+)
+
+# final_arrival_df.write_parquet("sharing/final_arrival_df_mon15.parquet")
