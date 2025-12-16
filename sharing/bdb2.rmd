@@ -1,0 +1,819 @@
+---
+title: "Big Data Bowl"
+author: "Daniel Wang"
+date: "2025-11-30"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(arrow)
+library(tibble)
+library(tidyverse)
+```
+
+```{r}
+df <- read_parquet("final_throw_df_mon15.parquet") |> as_tibble()
+head(df)
+
+```
+
+
+```{r}
+# install.packages("nflfastR")
+library(nflfastR)
+
+```
+
+```{r}
+pbp <- load_pbp(2023)
+```
+
+```{r}
+head(pbp)
+```
+
+
+
+
+
+
+# Join DF with NFLFastR
+```{r}
+df <- df %>%
+  rename(old_game_id = game_id) %>%
+  mutate(
+    old_game_id = as.character(old_game_id),
+    play_id     = as.numeric(play_id)
+  )
+
+
+```
+
+```{r}
+head(pbp)
+```
+
+
+```{r}
+merged <- df %>%
+  inner_join(
+    pbp %>% 
+      select(
+        old_game_id,
+        play_id,
+        desc,
+        
+        # --- Outcome Metrics ---
+        epa,
+        wpa,
+        yards_gained,
+        air_yards,
+        yards_after_catch,
+        success,
+        cp,
+        cpoe,
+        complete_pass,
+        air_epa,
+        yac_epa,
+        
+        # --- Offensive Context ---
+        pass,
+        posteam,
+        receiver_player_name,
+        down,
+        ydstogo,
+        yardline_100
+      ),
+    by = c("old_game_id", "play_id")
+  )
+
+
+```
+
+```{r}
+head(merged)
+```
+
+```{r}
+num_df <- merged %>%
+  select(where(is.numeric)) %>% select(-play_id)
+head(num_df)
+```
+
+```{r}
+cor_vec <- sapply(num_df, function(x)
+  cor(merged$Receiver_Control, x, use = "complete.obs")
+)
+```
+
+```{r}
+cor_results <- tibble(
+  variable     = names(cor_vec),
+  correlation  = cor_vec
+) %>%
+  arrange(desc(abs(correlation)))
+
+cor_results
+```
+
+```{r}
+library(gt)
+
+
+cor_results %>%
+  slice(-n()) %>%                     # remove last row
+  mutate(correlation = round(correlation, 3)) %>%
+  gt() %>%
+  cols_label(
+    variable = "Variable",
+    correlation = "Correlation"
+  ) %>%
+  tab_header(
+    title = "Correlation Results",
+    subtitle = "Sorted by Absolute Correlation"
+  ) %>%
+  fmt_number(
+    columns = correlation,
+    decimals = 3
+  ) %>%
+  opt_table_outline() %>%
+  gtsave(
+    filename = "correlation_table.png"
+  )
+
+
+```
+
+
+
+
+
+```{r}
+library(ggplot2)
+
+plot_relationship <- function(df, xvar) {
+  ggplot(df, aes_string(x = "Receiver_Control", y = xvar)) +
+    geom_point(alpha = 0.25) +
+    geom_smooth(method = "lm", se = TRUE, color = "blue") +
+    theme_minimal() +
+    labs(
+      title = paste("Receiver Control vs", xvar),
+      x = "Receiver Control",
+      y = xvar
+    )
+}
+
+plot_relationship(merged, "air_epa")
+plot_relationship(merged, "air_yards")
+plot_relationship(merged, "cp")
+plot_relationship(merged, "yac_epa")
+plot_relationship(merged, "complete_pass")
+plot_relationship(merged, "cpoe")
+plot_relationship(merged, "yards_after_catch")
+plot_relationship(merged, "down")
+plot_relationship(merged, "ydstogo")
+
+```
+
+
+```{r}
+vars <- c(
+  "air_epa",
+  "air_yards",
+  "cp",
+  "yac_epa",
+  "complete_pass",
+  "cpoe",
+  "yards_after_catch",
+  "down",
+  "ydstogo"
+)
+
+results <- lapply(vars, function(v) {
+  model <- lm(as.formula(paste(v, "~ Receiver_Control")), data = merged)
+  tibble(
+    variable = v,
+    estimate = coef(summary(model))["Receiver_Control", "Estimate"],
+    p_value  = coef(summary(model))["Receiver_Control", "Pr(>|t|)"],
+    r_squared = summary(model)$r.squared
+  )
+})
+
+significance_table <- bind_rows(results)
+significance_table
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# NAs
+clean <- merged %>%
+  filter(!is.na(Receiver_Control), !is.na(cp))
+
+# Threshold Avg.
+threshold_rate <- clean %>%
+  filter(Receiver_Control >= 0.5) %>%
+  summarize(rate = mean(cp)) %>%
+  pull(rate)
+
+# Create bins
+binned <- clean %>%
+  mutate(rc_bin = cut(
+    Receiver_Control,
+    breaks = seq(0, 1, by = 0.1),
+    include.lowest = TRUE
+  )) %>%
+  group_by(rc_bin) %>%
+  summarize(
+    completion_rate = mean(cp),
+    n = n(),
+    .groups = "drop"
+  )
+
+# Plot
+ggplot(binned, aes(x = rc_bin, y = completion_rate)) +
+  geom_col(fill = "#3A86FF") +
+  geom_hline(
+    yintercept = threshold_rate,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n)),
+    vjust = -0.5,
+    size = 3
+  ) +
+  labs(
+    title = "Average Completion Probability by Receiver Control Deciles",
+    subtitle = paste0(
+      "Red dashed line = average completion probability for Receiver Control ≥ 0.5 (",
+      sprintf("%.2f", threshold_rate), ")"
+    ),
+    x = "Receiver Control Bin",
+    y = "Average Completion Probability"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+ggsave("completion_prob_vs_receiever_control.png")
+```
+
+```{r}
+# do for completion rate
+
+clean <- merged %>%
+  filter(!is.na(Receiver_Control), !is.na(complete_pass))
+
+threshold_rate <- clean %>%
+  filter(Receiver_Control >= 0.5) %>%
+  summarize(rate = mean(complete_pass)) %>%
+  pull(rate)
+
+binned <- clean %>%
+  mutate(rc_bin = cut(
+    Receiver_Control,
+    breaks = seq(0, 1, by = 0.1),
+    include.lowest = TRUE
+  )) %>%
+  group_by(rc_bin) %>%
+  summarize(
+    completion_rate = mean(complete_pass),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(binned, aes(x = rc_bin, y = completion_rate)) +
+  geom_col(fill = "#3A86FF") +
+  geom_hline(
+    yintercept = threshold_rate,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n)),
+    vjust = -0.5,
+    size = 3
+  ) +
+  labs(
+    title = "Average Completion Rate by Receiver Control Deciles",
+    subtitle = paste0(
+      "Red dashed line = average completion rate for Receiver Control ≥ 0.5 (",
+      sprintf("%.2f", threshold_rate), ")"
+    ),
+    x = "Receiver Control Bin",
+    y = "Average Completion Rate"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+ggsave("completion_vs_receiever_control.png")
+```
+
+
+```{r}
+clean <- merged %>%
+  filter(!is.na(Receiver_Control), !is.na(yac_epa))
+
+threshold_rate <- clean %>%
+  filter(Receiver_Control >= 0.5) %>%
+  summarize(rate = mean(yac_epa)) %>%
+  pull(rate)
+
+binned <- clean %>%
+  mutate(rc_bin = cut(
+    Receiver_Control,
+    breaks = seq(0, 1, by = 0.1),
+    include.lowest = TRUE
+  )) %>%
+  group_by(rc_bin) %>%
+  summarize(
+    completion_rate = mean(yac_epa),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(binned, aes(x = rc_bin, y = completion_rate)) +
+  geom_col(fill = "#3A86FF") +
+  geom_hline(
+    yintercept = threshold_rate,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n)),
+    vjust = -0.5,
+    size = 3
+  ) +
+  labs(
+    title = "Average YAC EPA by Receiver Control Deciles",
+    subtitle = paste0(
+      "Red dashed line = average YAC EPA for Receiver Control ≥ 0.5 (",
+      sprintf("%.2f", threshold_rate), ")"
+    ),
+    x = "Receiver Control Bin",
+    y = "Average YAC EPA"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+ggsave("yac_epa_vs_receiever_control.png")
+```
+
+
+
+
+
+# Find key plays
+
+
+
+```{r}
+library(dplyr)
+library(arrow)
+library(nflreadr)
+library(stringr)
+library(readr)
+
+
+# ----------------------------
+results_throw <- read_parquet("final_throw_df_mon15.parquet")
+results_arrival <- read_parquet("final_arrival_df_mon15.parquet")
+
+results_throw <- results_throw |>
+  mutate(game_id = as.character(game_id))
+
+results_arrival <- results_arrival |>
+  mutate(game_id = as.character(game_id))
+
+
+approve_at_throw <- results_throw |>
+  filter(Receiver_Control > 0.5) |>
+  select(game_id, play_id, Receiver_Control) |>
+  distinct()
+
+approve_at_catch <- results_arrival |>
+  filter(Def_Player_Control > 0.5) |>
+  select(game_id, play_id, nfl_id, Def_Player_Control) |>
+  distinct()
+
+# Play level table
+opp_play_level <- approve_at_catch |>
+  inner_join(approve_at_throw, by = c("game_id", "play_id")) |>
+  mutate(turnover_opp = 1L)
+
+
+pbp <- load_pbp(2023) |>
+  select(
+    game_id, play_id,
+    qtr, quarter_seconds_remaining,
+    down, ydstogo, yardline_100,
+    posteam, defteam,
+    play_type, pass, complete_pass, interception,
+    desc
+  )
+
+
+games <- load_schedules(2023) |>
+  select(
+    game_id, season, week, gameday,
+    home_team, away_team, old_game_id
+  )
+
+players <- load_players() |>
+  transmute(
+    nfl_id = as.numeric(nfl_id),
+    player_name = display_name,
+    position = position,
+    position_group = position_group
+  )
+
+opp_lookup <- opp_play_level |>
+  mutate(game_id = as.character(game_id),
+         play_id = as.integer(play_id)) |>
+
+  # 1) Map GSIS -> nflfastR game_id + teams/week
+  left_join(
+    games |>
+      mutate(old_game_id = as.character(old_game_id)) |>
+      select(old_game_id, nflfastR_game_id = game_id, season, week, gameday,
+             home_team, away_team),
+    by = c("game_id" = "old_game_id")
+  ) |>
+
+  # 2) Join PBP using nflfastR game_id + play_id
+  left_join(
+    pbp |>
+      transmute(
+        nflfastR_game_id = game_id,
+        play_id = as.integer(play_id),
+        qtr, quarter_seconds_remaining,
+        down, ydstogo, yardline_100,
+        posteam, defteam,
+        desc, complete_pass, interception
+      ),
+    by = c("nflfastR_game_id", "play_id")
+  ) |>
+
+  # 3) Add player info
+  left_join(players, by = "nfl_id") |>
+
+  # 4) Make search-friendly fields
+  mutate(
+    clock_mm = ifelse(!is.na(quarter_seconds_remaining),
+                      sprintf("%d:%02d",
+                              quarter_seconds_remaining %/% 60,
+                              quarter_seconds_remaining %% 60),
+                      NA_character_),
+    matchup = ifelse(!is.na(away_team) & !is.na(home_team),
+                     paste0(away_team, " @ ", home_team),
+                     NA_character_)
+  )
+
+
+
+```
+
+
+
+```{r}
+top_clips <- opp_lookup |>
+  filter(!is.na(gameday)) |>
+  arrange(desc(Def_Player_Control), desc(Receiver_Control)) |>
+  select(
+    season, week, matchup, Receiver_Control, Def_Player_Control, desc,gameday,
+    game_id, play_id,
+    qtr, clock_mm, down, ydstogo, yardline_100,
+    posteam, defteam,
+    player_name, position,
+    interception, complete_pass)
+
+```
+
+```{r}
+write_csv(top_clips, "top_clips.csv")
+
+top_clips
+```
+
+
+
+
+
+
+
+
+
+ignore below
+
+# Start Fresh
+
+```{r}
+library(tidyverse)
+library(arrow)
+library(DescTools)
+
+
+# supp <- read_parquet("data/supp.parquet")
+
+
+input <- read_parquet("input.parquet") |>
+  mutate(player_to_predict = as.logical(player_to_predict)) |>
+  mutate(
+    new_y = if_else(play_direction == "left", 120 - x, x),
+    new_x = if_else(play_direction == "left", 160 / 3 - y, y),
+    new_ball_land_x = ifelse(
+      play_direction == "left",
+      160 / 3 - ball_land_y,
+      ball_land_y
+    ),
+    new_ball_land_y = ifelse(
+      play_direction == "left",
+      120 - ball_land_x,
+      ball_land_x
+    ),
+    dir = ifelse(play_direction == "left", dir + 180, dir),
+    dir = ifelse(dir > 360, dir - 360, dir),
+    o = ifelse(play_direction == "left", o + 180, o),
+    o = ifelse(o > 360, o - 360, o)
+  ) |>
+  mutate(
+    y = new_y,
+    x = new_x,
+    ball_land_x = new_ball_land_x,
+    ball_land_y = new_ball_land_y
+  ) |>
+  select(-c(new_x, new_y, new_ball_land_x, new_ball_land_y)) |>
+  mutate(h_dist_from_ball = abs(ball_land_x - x)) |>
+  mutate(v_dist_from_ball = abs(ball_land_y - y)) |>
+  mutate(total_dist_from_ball = (h_dist_from_ball^2 + v_dist_from_ball^2)^.5) |>
+  mutate(dir = DegToRad(dir)) |>
+  mutate(o = DegToRad(o)) |>
+  mutate(hcomp = cos(dir), vcomp = sin(dir)) |>
+  mutate(h_speed = hcomp * s, v_speed = vcomp * s)
+
+
+output <- read_parquet("output.parquet") |>
+  left_join(
+    read_parquet("input.parquet") |>
+      select(game_id, play_id, play_direction) |>
+      unique(),
+    by = join_by(game_id, play_id)
+  ) |>
+  mutate(
+    new_y = if_else(play_direction == "left", 120 - x, x),
+    new_x = if_else(play_direction == "left", 160 / 3 - y, y)
+  ) |>
+  mutate(
+    y = new_y,
+    x = new_x,
+  ) |>
+  select(-c(new_y, new_x)) |>
+  mutate(
+    x_lag_1 = lag(x, n = 1),
+    x_lag_2 = lag(x, n = 2),
+    x_lag_3 = lag(x, n = 3),
+    y_lag_1 = lag(y, n = 1),
+    y_lag_2 = lag(y, n = 2),
+    y_lag_3 = lag(y, n = 3),
+    .by = c(game_id, play_id, nfl_id)
+  ) |>
+  mutate(
+    s_est = sqrt((x_lag_3 - x_lag_1)**2 + (y_lag_3 - y_lag_1)**2) / .2
+  ) |>
+  mutate(
+    dir_est = atan2(y_lag_1 - y_lag_3, x_lag_1 - x_lag_3) %% (2 * pi)
+  ) |>
+  mutate(hcomp_est = cos(dir_est), vcomp_est = sin(dir_est)) |>
+  mutate(h_speed_est = hcomp_est * s_est, v_speed_est = vcomp_est * s_est)
+
+
+play_info <- input |>
+  filter(player_to_predict) |>
+  select(
+    game_id,
+    play_id,
+    nfl_id,
+    player_name,
+    player_side,
+    player_role,
+    num_frames_output,
+    ball_land_x,
+    ball_land_y
+  ) |>
+  distinct()
+
+
+enhanced_output <- output |>
+  left_join(play_info, by = join_by(game_id, play_id, nfl_id)) |>
+  select(-play_direction) |>
+  mutate(h_dist_from_ball = abs(ball_land_x - x)) |>
+  mutate(v_dist_from_ball = abs(ball_land_y - y)) |>
+  mutate(total_dist_from_ball = (h_dist_from_ball^2 + v_dist_from_ball^2)^.5)
+
+
+at_throw_df <- input |>
+  filter(frame_id == (max(frame_id) - 5), .by = c(game_id, play_id, nfl_id)) |>
+  filter(player_to_predict)
+
+at_arrival_df <- enhanced_output |>
+  filter(frame_id == max(frame_id), .by = c(game_id, play_id, nfl_id))
+
+# write_parquet(at_throw_df, "transfer/at_throw_df.parquet")
+# write_parquet(at_arrival_df, "transfer/at_arrival_df.parquet")
+```
+
+```{r}
+results_arrival
+```
+
+
+
+```{r}
+results_throw <- read_parquet("final_throw_df_mon15.parquet")
+
+results_throw |> filter(is.na(Receiver_Control))
+
+results_arrival <- read_parquet("final_arrival_df_mon15.parquet")
+
+valid_arrivals <- results_arrival |>
+  filter(!is.na(Def_Player_Control))
+
+valid_arrivals |>
+  count(Def_Player_Control > 1)
+
+invalid_arrivals <- results_arrival |>
+  filter(is.na(Def_Player_Control))
+
+
+pl_nflfastr <- load_players() |>
+  select(
+    display_name,
+    short_name,
+    nfl_id,
+    position_group,
+    position,
+    height,
+    weight,
+    headshot,
+    pff_position,
+    gsis_id
+  ) |>
+  mutate(nfl_id = as.numeric(nfl_id))
+
+
+player_df <- input |>
+  select(nfl_id, player_name, player_position) |>
+  unique() |>
+  left_join(pl_nflfastr, join_by(nfl_id))
+
+
+# leaderboard -------------------------------------------------------------
+
+approve_at_throw <- results_throw |>
+  filter(Receiver_Control > .5)
+
+approve_at_catch <- results_arrival |>
+  filter(Def_Player_Control > 1)
+
+full_leaderboard <- approve_at_catch |>
+  inner_join(approve_at_throw, by = join_by(game_id, play_id)) |>
+  summarize(n = n(), .by = nfl_id) |>
+  arrange(desc(n)) |>
+  left_join(player_df, by = join_by(nfl_id)) |>
+  relocate(n, .after = last_col())
+
+```
+
+```{r}
+head(full_leaderboard)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readr)
+
+# 1) Read PFF
+pff <- read_csv("pff-data (2).csv", show_col_types = FALSE)
+
+# 2) Robust name cleaning for matching
+clean_name <- function(x) {
+  x |>
+    str_replace_all("\u00a0", " ") |>          # non-breaking spaces
+    str_replace_all("[’`]", "'") |>            # apostrophes to straight
+    str_to_lower() |>
+    str_squish() |>
+    str_replace_all("\\.", "") |>              # remove periods
+    str_replace_all(",", "") |>                # remove commas
+    str_replace_all("\\b(jr|sr|ii|iii|iv)\\b", "") |>  # drop suffixes
+    str_squish()
+}
+
+# 3) Add join key to leaderboard + PFF
+leaderboard_clean <- full_leaderboard |>
+  mutate(player_name_key = clean_name(player_name))
+
+pff_clean <- pff |>
+  mutate(player_name_key = clean_name(Name))
+
+# 4) Collapse duplicates in PFF (choose a rule)
+# If your PFF file has one row per player already, this is harmless.
+# If multiple rows per player (seasons/teams), averaging numeric columns is safer than first().
+# pff_one_row <- pff_clean |>
+#   group_by(player_name_key) |>
+#   summarise(
+#     across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+#     across(where(~ !is.numeric(.x)), ~ dplyr::first(.x)),
+#     .groups = "drop"
+#   )
+
+# 5) Join
+leaderboard_with_pff <- leaderboard_clean |>
+  left_join(pff_clean, by = "player_name_key") |>
+  select(-player_name_key)
+
+```
+
+```{r}
+leaderboard_with_pff <- leaderboard_with_pff |>
+  mutate(
+    COMP_PCT = as.numeric(str_remove(`COMP%`, "%")),
+    GRADE = COV...10
+  )
+```
+
+
+```{r}
+leaderboard_with_pff
+```
+
+
+
+```{r}
+library(dplyr)
+
+corr_df <- leaderboard_with_pff |>
+  select(n, GRADE, INT, PBU, COMP_PCT, RTG) |>
+  mutate(across(everything(), as.numeric))
+
+cor_mat_spearman <- cor(
+  corr_df,
+  use = "pairwise.complete.obs",
+  method = "spearman"
+)
+
+round(cor_mat_spearman, 3)
+
+```
+
+```{r}
+
+```
+
+```{r}
+library(dplyr)
+
+cor_n_all <- leaderboard_with_pff |>
+  select(where(is.numeric)) |>
+  summarise(
+    across(
+      -n,
+      ~ cor(n, .x, use = "pairwise.complete.obs", method = "spearman")
+    )
+  ) |>
+  pivot_longer(
+    everything(),
+    names_to = "metric",
+    values_to = "spearman_corr"
+  ) |>
+  arrange((spearman_corr))
+
+cor_n_all
+
+```
+
+
+
+
+
+
