@@ -22,6 +22,7 @@ Wickham H, Averick M, Bryan J, Chang W, McGowan LD, François R, Grolemund G, Ha
 
 Hassaan Inayatali, Daniel Hocevar, Aaron White. (2023). Between the Lines: How Do We Measure Pressure? NFL Big DataBowl 2023 entry. Kaggle. [https://www.kaggle.com/code/hassaaninayatali/between-the-lines-how-do-we-measure-pressure]
 
-Bock, J. R. (2017). Empirical Prediction of Turnovers in NFL Football. Sports, 5(1), 1. [https://doi.org/10.3390/sports5010001]
+Bock J. R. (2016). Empirical Prediction of Turnovers in NFL Football. Sports (Basel, Switzerland), 5(1), 1. https://doi.org/10.3390/sports5010001
 
 Michael Lopez, Tom Bliss, Ally Blake, and Addison Howard. NFL Big Data Bowl 2026 - Analytics. https://kaggle.com/competitions/nfl-big-data-bowl-2026-analytics, 2025. Kaggle.
+
