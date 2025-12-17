@@ -203,16 +203,37 @@ makeViz <- function(
   return(a1)
 }
 
+input2 <- input |>
+  filter(game_id == "2023100809" & play_id == "2344") |>
+  select(game_id, play_id, nfl_id, frame_id, x, y, player_side)
+
+
+output2 <- output |>
+  filter(game_id == "2023100809" & play_id == "2344") |>
+  left_join(
+    input2 |> select(nfl_id, player_side) |> distinct(),
+    by = join_by(nfl_id)
+  ) |>
+  select(game_id, play_id, frame_id, x, y, player_side) |>
+  mutate(frame_id = 58 + frame_id)
+
+full2 <- input2 |>
+  bind_rows(output2)
+
 makeViz(
-  input,
+  full2,
   output,
   supp,
-  2023090700,
-  101,
-  "KC",
-  "DET",
-  "red",
-  "blue",
+  2023100809,
+  2344,
+  "DEN",
+  "NYJ",
+  "#FB4F14",
+  "#125740",
   "2023",
-  "05"
+  "5",
+  yardlow = 15,
+  yardhigh = 70,
+  # toSave = TRUE,
+  # saveName = "Sutton_Gardner_Rep"
 )
